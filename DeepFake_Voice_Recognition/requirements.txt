@@ -1,0 +1,16 @@
+torch>=2.1
+transformers>=4.35
+soundfile
+librosa
+numpy
+pandas
+matplotlib
+seaborn
+scikit-learn
+tqdm
+
+# Optional: only needed for `export.py` / `main.py export`
+onnx
+# onnxruntime
+onnxruntime-gpu
+onnxscript
