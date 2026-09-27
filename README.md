@@ -16,6 +16,7 @@ An end-to-end, production-grade deepfake audio and AI voice cloning detection sy
 - [Architecture Overview](#-architecture-overview)
 - [Repository Structure](#-repository-structure)
 - [Installation](#-installation)
+- [Pretrained Weights](#-pretrained-weights)
 - [Quick Start](#-quick-start)
   - [1. Audio Dataset Segmentation](#1-audio-dataset-segmentation)
   - [2. Model Training](#2-model-training)
@@ -172,6 +173,25 @@ pip install -e .
 ```bash
 pip install -e .[onnx]
 ```
+
+---
+
+## 📥 Pretrained Weights
+
+Pretrained model checkpoints are available for download from the `deepfake_voice_recognition_checkpoints` Google Drive folder:
+
+**[Download Pretrained Weights](https://drive.google.com/drive/folders/1EHywemtBhQBpmlsPHGc6nG1vUN-li5Q1)**
+
+The folder contains four files:
+
+| File | Description |
+|---|---|
+| `checkpoint_best.pt` | PyTorch checkpoint with the lowest validation loss during training |
+| `checkpoint_latest.pt` | Most recent PyTorch checkpoint, used to resume training |
+| `model.onnx` | Converted ONNX model weights (FP32) |
+| `model_quantized.onnx` | INT8-quantized ONNX model for faster, lighter CPU inference |
+
+After downloading, place the checkpoint file(s) into a local `checkpoints/` directory (create it if it doesn't exist) so they can be referenced directly with the `--checkpoint` flag in the CLI commands below, e.g. `checkpoints/checkpoint_best.pt`.
 
 ---
 
