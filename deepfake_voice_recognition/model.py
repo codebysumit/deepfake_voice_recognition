@@ -1,22 +1,28 @@
 """
 model.py
 --------
-The network: a wav2vec2 backbone (partially fine-tuned) feeding a shallow
-1D ResNet classification head.
+Deepfake Voice Detection Architecture:
+Fine-tuned Wav2Vec2 audio representation backbone coupled to a 1D ResNet
+temporal feature aggregation and classification head.
 """
+
+from typing import Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2Model
 
-from config import cfg
+try:
+    from .config import cfg
+except ImportError:
+    from config import cfg
 
 
 class ResBlock1D(nn.Module):
-    """conv -> BN -> ReLU -> conv -> BN, with a skip connection."""
+    """1D Residual Block: Conv1d -> BatchNorm1d -> ReLU -> Conv1d -> BatchNorm1d + Skip Connection."""
 
-    def __init__(self, in_ch, out_ch, stride=1):
+    def __init__(self, in_ch: int, out_ch: int, stride: int = 1):
         super().__init__()
         self.conv1 = nn.Conv1d(in_ch, out_ch, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm1d(out_ch)
@@ -31,7 +37,7 @@ class ResBlock1D(nn.Module):
                 nn.BatchNorm1d(out_ch),
             )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         identity = x
         out = self.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
@@ -41,9 +47,17 @@ class ResBlock1D(nn.Module):
 
 
 class ResNet1DHead(nn.Module):
-    """Shallow ResNet-style stack over the time axis of wav2vec2 embeddings."""
+    """
+    1D ResNet Temporal Convolutional Head for processing Wav2Vec2 frame-level embeddings.
+    """
 
-    def __init__(self, in_dim, base_channels=128, num_blocks=(1, 1, 1)):
+    def __init__(
+        self,
+        in_dim: int,
+        base_channels: int = 128,
+        num_blocks: Sequence[int] = (1, 1, 1),
+        num_classes: int = 2,
+    ):
         super().__init__()
         self.input_proj = nn.Sequential(
             nn.Conv1d(in_dim, base_channels, kernel_size=1),
@@ -67,11 +81,12 @@ class ResNet1DHead(nn.Module):
             nn.BatchNorm1d(64),
             nn.ReLU(inplace=True),
             nn.Dropout(0.3),
-            nn.Linear(64, 2),
+            nn.Linear(64, num_classes),
         )
 
-    def forward(self, x):
-        x = x.transpose(1, 2)          # (batch, time, channels) -> (batch, channels, time)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Input shape: (batch, time, channels) -> (batch, channels, time)
+        x = x.transpose(1, 2)
         x = self.input_proj(x)
         x = self.stages(x)
         x = F.adaptive_avg_pool1d(x, 1).squeeze(-1)
@@ -80,11 +95,15 @@ class ResNet1DHead(nn.Module):
 
 class Wav2Vec2ResNetDetector(nn.Module):
     """
-    wav2vec2 backbone (last `num_unfrozen_layers` transformer layers
-    trainable, everything else frozen) + ResNet1DHead classifier.
+    Complete Deepfake Voice Detector.
+    Wav2Vec 2.0 backbone (fine-tuning last `num_unfrozen_layers` layers) + ResNet1D classification head.
     """
 
-    def __init__(self, model_name=None, num_unfrozen_layers=None):
+    def __init__(
+        self,
+        model_name: Optional[str] = None,
+        num_unfrozen_layers: Optional[int] = None,
+    ):
         super().__init__()
         model_name = model_name or cfg.model_name
         num_unfrozen_layers = cfg.num_unfrozen_layers if num_unfrozen_layers is None else num_unfrozen_layers
@@ -92,10 +111,12 @@ class Wav2Vec2ResNetDetector(nn.Module):
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
         self.wav2vec2 = Wav2Vec2Model.from_pretrained(model_name)
         self._freeze_backbone_layers(num_unfrozen_layers)
+
         hidden_dim = self.wav2vec2.config.hidden_size
         self.head = ResNet1DHead(in_dim=hidden_dim)
 
-    def _freeze_backbone_layers(self, num_unfrozen_layers):
+    def _freeze_backbone_layers(self, num_unfrozen_layers: int) -> None:
+        """Freezes feature encoder and early transformer layers, keeping last N layers trainable."""
         for param in self.wav2vec2.feature_extractor.parameters():
             param.requires_grad = False
 
@@ -104,17 +125,17 @@ class Wav2Vec2ResNetDetector(nn.Module):
 
         for i, layer in enumerate(self.wav2vec2.encoder.layers):
             for param in layer.parameters():
-                param.requires_grad = i >= freeze_until
+                param.requires_grad = (i >= freeze_until)
 
-        print(f"wav2vec2: {total_layers} transformer layers total, "
-              f"fine-tuning last {num_unfrozen_layers}, rest frozen.")
+        print(
+            f"Wav2Vec2 backbone: {total_layers} transformer encoder layers. "
+            f"Fine-tuning top {num_unfrozen_layers} layers (bottom {freeze_until} frozen)."
+        )
 
-    def preprocess(self, raw_waveforms, sampling_rate=None):
+    def preprocess(self, raw_waveforms: Sequence[torch.Tensor], sampling_rate: Optional[int] = None) -> torch.Tensor:
         """
-        Convert a list/batch of raw waveforms into normalized, padded
-        input_values. Kept OUTSIDE forward() so forward() stays a pure
-        tensor-in/tensor-out function (needed for ONNX/TorchScript export;
-        HF's numpy-based feature extractor isn't traceable).
+        Normalizes and pads raw 1D waveforms into a batched Tensor.
+        Separated from forward() to ensure forward() is cleanly traceable for ONNX export.
         """
         sampling_rate = sampling_rate or cfg.sample_rate
         inputs = self.feature_extractor(
@@ -125,33 +146,35 @@ class Wav2Vec2ResNetDetector(nn.Module):
         )
         return inputs.input_values
 
-    def forward(self, input_values):
+    def forward(self, input_values: torch.Tensor) -> torch.Tensor:
         """
+        Forward pass.
         Args:
-            input_values: FloatTensor (batch, time) — already normalized
-                           and padded via self.preprocess().
+            input_values: Preprocessed FloatTensor of shape (batch_size, num_samples).
+        Returns:
+            Logits of shape (batch_size, 2).
         """
         wav2vec2_out = self.wav2vec2(input_values).last_hidden_state
         return self.head(wav2vec2_out)
 
 
-def build_model(device=None):
-    """Convenience factory: builds the detector and moves it to `device`."""
+def build_model(device: Optional[torch.device] = None) -> Wav2Vec2ResNetDetector:
+    """Builds and initializes the detector on the target compute device."""
     device = device or cfg.device
     model = Wav2Vec2ResNetDetector().to(device)
     return model
 
 
-def count_parameters(model):
+def count_parameters(model: nn.Module) -> Tuple[int, int]:
+    """Returns (total_params, trainable_params)."""
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return total, trainable
 
 
 if __name__ == "__main__":
-    # Quick architecture sanity check: `python model.py`
     m = build_model()
     total, trainable = count_parameters(m)
     print(m)
-    print(f"\nTotal Parameters: {total:,}")
+    print(f"\nTotal Parameters    : {total:,}")
     print(f"Trainable Parameters: {trainable:,}")

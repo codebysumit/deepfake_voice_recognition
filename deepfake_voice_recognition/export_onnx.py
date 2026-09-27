@@ -1,39 +1,34 @@
 """
 export_onnx.py
----------------
-Exports the trained PyTorch model to ONNX and produces a dynamically
-quantized (INT8) version for fast CPU inference on lower-powered machines.
+--------------
+Exports the trained PyTorch Wav2Vec2 + 1D ResNet model to ONNX format
+and creates a dynamically quantized (INT8) model optimized for fast CPU inference.
 
-NOTE: quantization only targets MatMul ops (`op_types_to_quantize=["MatMul"]`).
-Quantizing the Conv1d layers as well makes CPU inference *slower* on many
-ONNX Runtime builds for this architecture — MatMul-only quantization is the
-fast path that was validated for this model.
-
-Run directly:
-    python export_onnx.py --checkpoint checkpoints/checkpoint_best.pt
-
-Then run inference on the exported model with:
-    python export_onnx.py --run-sample --audio path/to/clip.wav
+Usage:
+    python -m deepfake_voice_recognition.export_onnx --checkpoint checkpoints/checkpoint_best.pt
 """
 
 import argparse
 import os
 import sys
+from typing import Optional, Tuple
 
-# Ensure current directory is in sys.path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import torch
+import librosa
 import numpy as np
 import soundfile as sf
-import librosa
+import torch
 
-from config import cfg
-from model import Wav2Vec2ResNetDetector
-from utils import load_model_for_inference
+try:
+    from .config import cfg
+    from .model import Wav2Vec2ResNetDetector
+    from .utils import load_model_for_inference
+except ImportError:
+    from config import cfg
+    from model import Wav2Vec2ResNetDetector
+    from utils import load_model_for_inference
 
 
-def _load_and_fix_length(audio_path):
+def _load_and_fix_length(audio_path: str) -> torch.Tensor:
     waveform, orig_sr = sf.read(audio_path, always_2d=False)
     if waveform.ndim > 1:
         waveform = np.mean(waveform, axis=1)
@@ -48,8 +43,12 @@ def _load_and_fix_length(audio_path):
     return torch.tensor(waveform.astype(np.float32))
 
 
-def export_to_onnx(model, sample_waveform, output_path=None):
-    """Exports `model` to a static-opset ONNX file with dynamic batch/time axes."""
+def export_to_onnx(
+    model: Wav2Vec2ResNetDetector,
+    sample_waveform: torch.Tensor,
+    output_path: Optional[str] = None,
+) -> Tuple[str, torch.Tensor]:
+    """Exports model to ONNX with dynamic batch and time dimensions."""
     output_path = output_path or cfg.onnx_fp32_path
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -71,17 +70,20 @@ def export_to_onnx(model, sample_waveform, output_path=None):
                 "input_values": {0: "batch", 1: "time"},
                 "output": {0: "batch"},
             },
-            dynamo=False,  # legacy TorchScript-based tracer — more predictable for this model
+            dynamo=False,
         )
 
-    print(f"Exported ONNX model to {output_path} "
-          f"({os.path.getsize(output_path) / (1024 * 1024):.2f} MB)")
+    file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    print(f"Successfully exported FP32 ONNX model to: {output_path} ({file_size_mb:.2f} MB)")
     return output_path, dummy_input_values
 
 
-def quantize_onnx(onnx_path=None, quantized_path=None):
-    """Dynamic INT8 quantization, MatMul-only (fast path for this architecture)."""
-    from onnxruntime.quantization import quantize_dynamic, QuantType
+def quantize_onnx(
+    onnx_path: Optional[str] = None,
+    quantized_path: Optional[str] = None,
+) -> str:
+    """Dynamic INT8 quantization targeting MatMul operations for optimal CPU throughput."""
+    from onnxruntime.quantization import QuantType, quantize_dynamic
 
     onnx_path = onnx_path or cfg.onnx_fp32_path
     quantized_path = quantized_path or cfg.onnx_quantized_path
@@ -92,20 +94,13 @@ def quantize_onnx(onnx_path=None, quantized_path=None):
         weight_type=QuantType.QInt8,
         op_types_to_quantize=["MatMul"],
     )
-    print(f"Quantized ONNX model saved to {quantized_path} "
-          f"({os.path.getsize(quantized_path) / (1024 * 1024):.2f} MB)")
-
-    import onnx
-    op_types = set(n.op_type for n in onnx.load(quantized_path).graph.node)
-    print("Op types in quantized model:", op_types)
-    if "QLinearConv" in op_types:
-        print("WARNING: Conv layers were quantized — this is likely the slow variant. "
-              "Re-run with op_types_to_quantize=['MatMul'] only.")
+    file_size_mb = os.path.getsize(quantized_path) / (1024 * 1024)
+    print(f"Quantized INT8 ONNX model saved to: {quantized_path} ({file_size_mb:.2f} MB)")
     return quantized_path
 
 
-def run_onnx_inference(quantized_path, input_values):
-    """Runs a single forward pass through the quantized ONNX model."""
+def run_onnx_inference(quantized_path: str, input_values: torch.Tensor):
+    """Executes test inference using ONNX Runtime."""
     import onnxruntime as ort
 
     sess_options = ort.SessionOptions()
@@ -119,9 +114,9 @@ def run_onnx_inference(quantized_path, input_values):
 
 def main():
     parser = argparse.ArgumentParser(description="Export and quantize the model to ONNX.")
-    parser.add_argument("--checkpoint", default=cfg.ckpt_best)
+    parser.add_argument("--checkpoint", default=cfg.ckpt_best, help="Path to .pt checkpoint.")
     parser.add_argument("--audio", default=None, help="Sample audio file used to trace the export.")
-    parser.add_argument("--skip-quantize", action="store_true")
+    parser.add_argument("--skip-quantize", action="store_true", help="Skip INT8 quantization.")
     args = parser.parse_args()
 
     cfg.ensure_dirs()
@@ -130,7 +125,6 @@ def main():
     if args.audio:
         sample_waveform = _load_and_fix_length(args.audio)
     else:
-        # Deterministic dummy waveform when no sample audio is provided.
         sample_waveform = torch.zeros(cfg.num_samples)
 
     _, dummy_input_values = export_to_onnx(model, sample_waveform)
@@ -138,7 +132,7 @@ def main():
     if not args.skip_quantize:
         quantized_path = quantize_onnx()
         outputs = run_onnx_inference(quantized_path, dummy_input_values)
-        print("Sample ONNX output:", outputs)
+        print("ONNX Runtime Verification Output:", outputs)
 
 
 if __name__ == "__main__":
