@@ -46,25 +46,35 @@ An end-to-end, production-grade deepfake audio and AI voice cloning detection sy
   <img src="./assets/model_architecture.svg" alt="Model Architecture Diagram" width="100%"/>
 </p>
 
-```
-Raw Audio (16 kHz, Mono) ──► Wav2Vec2 Feature Extractor (Frozen)
-                                        │
-                                        ▼
-                             Wav2Vec2 Encoder Layers
-                             ├── Layers 0-7 (Frozen)
-                             └── Layers 8-11 (Fine-Tuned)
-                                        │  (Batch, Time, 768)
-                                        ▼
-                                ResNet1D Head
-                             ├── Conv1D Input Projection (768 -> 128)
-                             ├── Stage 1: ResBlock1D (128 -> 128, stride 1)
-                             ├── Stage 2: ResBlock1D (128 -> 256, stride 2)
-                             ├── Stage 3: ResBlock1D (256 -> 512, stride 2)
-                             ├── AdaptiveAvgPool1d(1) -> (512,)
-                             └── Dense Classifier (512 -> 64 -> 2)
-                                        │
-                                        ▼
-                             [ Genuine (0) | Spoof (1) ]
+```mermaid
+flowchart TD
+    subgraph AudioInput["Audio Input & Preprocessing"]
+        A["Raw Audio Waveform (16 kHz, Mono)"] --> B["Wav2Vec2 Feature Extractor"]
+        B --> C["Normalized Tensor: input_values (Batch, Time)"]
+    end
+
+    subgraph Backbone["Wav2Vec 2.0 Encoder Backbone"]
+        C --> D["7-Layer CNN Feature Extractor (Frozen)"]
+        D --> E["Transformer Encoder Layers 0-7 (Frozen)"]
+        E --> F["Transformer Encoder Layers 8-11 (Fine-Tuned)"]
+        F --> G["Hidden Representation (Batch, Time, 768)"]
+    end
+
+    subgraph ResNetHead["1D ResNet Classification Head"]
+        G --> H["1D Input Projection (768 to 128 Channels)"]
+        H --> I["Stage 1: ResBlock1D (128 Channels, Stride 1)"]
+        I --> J["Stage 2: ResBlock1D (256 Channels, Stride 2)"]
+        J --> K["Stage 3: ResBlock1D (512 Channels, Stride 2)"]
+        K --> L["Adaptive Average Pooling 1D (512-dim Vector)"]
+        L --> M["Dense Layer (512 to 64) + BatchNorm + ReLU + Dropout(0.3)"]
+        M --> N["Linear Output Layer (64 to 2)"]
+    end
+
+    subgraph Classification["Prediction Output"]
+        N --> O["Softmax Probability"]
+        O --> P["Genuine (Class 0)"]
+        O --> Q["Spoof / Deepfake (Class 1)"]
+    end
 ```
 
 ---

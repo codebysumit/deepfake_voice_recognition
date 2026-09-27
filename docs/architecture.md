@@ -14,30 +14,35 @@ This document details the machine learning architecture and design decisions pow
 
 The system combines self-supervised speech representations with temporal convolutional feature aggregation:
 
-```
-[ Raw Audio Waveform (16 kHz, Mono) ]
-                 │
-                 ▼
-     [ Wav2Vec2 Feature Extractor ]
-                 │
-                 ▼
-[ Wav2Vec 2.0 Transformer Encoder Backbone ]
-  ├── Feature Extractor (Frozen)
-  ├── Early Transformer Layers (Frozen)
-  └── Top 4 Transformer Layers (Fine-Tuned)
-                 │  (Batch, Time_Steps, 768)
-                 ▼
-       [ ResNet1D Classification Head ]
-          ├── 1D Input Projection (768 -> 128 channels)
-          ├── Stage 1: ResBlock1D (128 -> 128 channels, stride=1)
-          ├── Stage 2: ResBlock1D (128 -> 256 channels, stride=2)
-          ├── Stage 3: ResBlock1D (256 -> 512 channels, stride=2)
-          ├── Adaptive Average Pooling 1D (512, 1) -> (512,)
-          ├── Dense Layer (512 -> 64) + BatchNorm1d + ReLU + Dropout(0.3)
-          └── Linear Output Layer (64 -> 2)
-                 │
-                 ▼
-     [ Logits: Genuine vs Spoof ]
+```mermaid
+flowchart TD
+    subgraph AudioInput["Audio Input & Feature Extraction"]
+        A["Raw Audio Waveform (16 kHz, Mono)"] --> B["Wav2Vec2 Feature Extractor"]
+        B --> C["Normalized Tensor: input_values (Batch, Time)"]
+    end
+
+    subgraph Backbone["Wav2Vec 2.0 Encoder Backbone"]
+        C --> D["7-Layer CNN Feature Extractor (Frozen)"]
+        D --> E["Transformer Encoder Layers 0-7 (Frozen)"]
+        E --> F["Transformer Encoder Layers 8-11 (Fine-Tuned)"]
+        F --> G["Hidden Representation (Batch, Time, 768)"]
+    end
+
+    subgraph ResNetHead["1D ResNet Temporal Classification Head"]
+        G --> H["1D Input Projection (768 to 128 Channels)"]
+        H --> I["Stage 1: ResBlock1D (128 Channels, Stride 1)"]
+        I --> J["Stage 2: ResBlock1D (256 Channels, Stride 2)"]
+        J --> K["Stage 3: ResBlock1D (512 Channels, Stride 2)"]
+        K --> L["Adaptive Average Pooling 1D (512-dim Vector)"]
+        L --> M["Dense Layer (512 to 64) + BatchNorm + ReLU + Dropout(0.3)"]
+        M --> N["Linear Output Layer (64 to 2)"]
+    end
+
+    subgraph Output["Output Predictions"]
+        N --> O["Softmax Probability"]
+        O --> P["Genuine (Class 0)"]
+        O --> Q["Spoof / Deepfake (Class 1)"]
+    end
 ```
 
 ---
