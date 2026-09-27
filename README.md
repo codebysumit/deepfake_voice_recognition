@@ -48,33 +48,69 @@ An end-to-end, production-grade deepfake audio and AI voice cloning detection sy
 
 ```mermaid
 flowchart TD
-    subgraph AudioInput["Audio Input & Preprocessing"]
-        A["Raw Audio Waveform (16 kHz, Mono)"] --> B["Wav2Vec2 Feature Extractor"]
-        B --> C["Normalized Tensor: input_values (Batch, Time)"]
+    %% Subgraph 1: Audio Input & Preprocessing
+    subgraph AudioInput["1. Audio Input & Preprocessing"]
+        A["Raw Audio Waveform<br/>(16 kHz, Mono)"]
+        B["Wav2Vec2 Feature Extractor<br/>(Zero-Mean & Unit-Variance)"]
+        C["Normalized Tensor<br/>input_values (Batch, Time)"]
+        A --> B
+        B --> C
     end
 
-    subgraph Backbone["Wav2Vec 2.0 Encoder Backbone"]
-        C --> D["7-Layer CNN Feature Extractor (Frozen)"]
-        D --> E["Transformer Encoder Layers 0-7 (Frozen)"]
-        E --> F["Transformer Encoder Layers 8-11 (Fine-Tuned)"]
-        F --> G["Hidden Representation (Batch, Time, 768)"]
+    %% Subgraph 2: Wav2Vec Backbone
+    subgraph Backbone["2. Wav2Vec 2.0 Encoder Backbone"]
+        D["7-Layer CNN Feature Extractor<br/>(Frozen)"]
+        E["Transformer Encoder Layers 0–7<br/>(Frozen)"]
+        F["Transformer Encoder Layers 8–11<br/>(Fine-Tuned)"]
+        G["Hidden Representation<br/>(Batch, Time, 768)"]
+        C --> D
+        D --> E
+        E --> F
+        F --> G
     end
 
-    subgraph ResNetHead["1D ResNet Classification Head"]
-        G --> H["1D Input Projection (768 to 128 Channels)"]
-        H --> I["Stage 1: ResBlock1D (128 Channels, Stride 1)"]
-        I --> J["Stage 2: ResBlock1D (256 Channels, Stride 2)"]
-        J --> K["Stage 3: ResBlock1D (512 Channels, Stride 2)"]
-        K --> L["Adaptive Average Pooling 1D (512-dim Vector)"]
-        L --> M["Dense Layer (512 to 64) + BatchNorm + ReLU + Dropout(0.3)"]
-        M --> N["Linear Output Layer (64 to 2)"]
+    %% Subgraph 3: 1D ResNet Temporal Head
+    subgraph ResNetHead["3. 1D ResNet Temporal Classification Head"]
+        H["1D Input Projection<br/>(768 → 128 Channels)"]
+        I["Stage 1: ResBlock1D<br/>(128 Channels, Stride 1)"]
+        J["Stage 2: ResBlock1D<br/>(256 Channels, Stride 2)"]
+        K["Stage 3: ResBlock1D<br/>(512 Channels, Stride 2)"]
+        L["Adaptive Average Pooling 1D<br/>(512-dim Vector)"]
+        M["Dense Classifier Block<br/>Dense(512→64) + BN + ReLU + Dropout(0.3)"]
+        N["Linear Output Layer<br/>(64 → 2 Logits)"]
+        G --> H
+        H --> I
+        I --> J
+        J --> K
+        K --> L
+        L --> M
+        M --> N
     end
 
-    subgraph Classification["Prediction Output"]
-        N --> O["Softmax Probability"]
-        O --> P["Genuine (Class 0)"]
-        O --> Q["Spoof / Deepfake (Class 1)"]
+    %% Subgraph 4: Predictions
+    subgraph Classification["4. Prediction Output"]
+        O["Softmax Layer<br/>(Probability Distribution)"]
+        P["Class 0: Genuine Voice"]
+        Q["Class 1: Spoof / Deepfake Voice"]
+        N --> O
+        O --> P
+        O --> Q
     end
+
+    %% Styling for High Contrast and Dark/Light Theme Compatibility
+    classDef inputNode fill:#0284c7,stroke:#0369a1,stroke-width:2px,color:#ffffff;
+    classDef backboneNode fill:#4f46e5,stroke:#4338ca,stroke-width:2px,color:#ffffff;
+    classDef resnetNode fill:#059669,stroke:#047857,stroke-width:2px,color:#ffffff;
+    classDef outputNode fill:#d97706,stroke:#b45309,stroke-width:2px,color:#ffffff;
+    classDef genuineNode fill:#16a34a,stroke:#15803d,stroke-width:2px,color:#ffffff;
+    classDef fakeNode fill:#dc2626,stroke:#b91c1c,stroke-width:2px,color:#ffffff;
+
+    class A,B,C inputNode;
+    class D,E,F,G backboneNode;
+    class H,I,J,K,L,M,N resnetNode;
+    class O outputNode;
+    class P genuineNode;
+    class Q fakeNode;
 ```
 
 ---
