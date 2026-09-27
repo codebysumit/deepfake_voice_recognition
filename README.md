@@ -25,6 +25,7 @@ An end-to-end, production-grade deepfake audio and AI voice cloning detection sy
   - [5. ONNX Export & INT8 Quantization](#5-onnx-export--int8-quantization)
 - [Python API Usage](#-python-api-usage)
 - [Dataset Organization](#-dataset-organization)
+  - [Dataset Download](#dataset-download)
 - [Detailed Documentation](#-detailed-documentation)
 - [License](#-license)
 
@@ -321,6 +322,14 @@ data/
         ├── Bengali/
         └── English/
 ```
+
+### Dataset Download
+
+The raw dataset is available for download from Google Drive:
+
+**[Download Dataset](https://drive.google.com/drive/folders/1Z-NKkp1t7XbyKYVupEowB0N1gJO3aHKY)**
+
+The folder contains a single archive, `indian-deepfake-voice.tar.gz`. Extract it into `./data/raw` (preserving the `real` / `fake` subfolder structure shown above) before running the `segment` command.
 
 ---
 
